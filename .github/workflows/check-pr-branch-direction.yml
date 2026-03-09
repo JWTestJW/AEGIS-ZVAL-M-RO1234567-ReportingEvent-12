@@ -1,0 +1,42 @@
+name: Check PR Branch Direction
+
+on:
+  pull_request:
+    types: [opened, reopened, edited]
+
+jobs:
+  check-pr-direction:
+    name: actions/check-pr-direction
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate PR source and target branches
+        run: |
+          BASE="${{ github.event.pull_request.base.ref }}"
+          HEAD="${{ github.event.pull_request.head.ref }}"
+
+          echo "Base branch (target): $BASE"
+          echo "Head branch (source): $HEAD"
+
+          # ✅ 許可されている PR の方向：dev → qa
+          if [[ "$HEAD" == "dev" && "$BASE" == "qa" ]]; then
+            echo "✅ Allowed PR: dev → qa"
+            exit 0
+          fi
+
+          # ✅ 許可されている PR の方向：qa → main
+          if [[ "$HEAD" == "qa" && "$BASE" == "main" ]]; then
+            echo "✅ Allowed PR: qa → main"
+            exit 0
+          fi
+
+          # ✅ 許可されている PR の方向：
+          #    feature ブランチ（dev / qa / main 以外）→ dev
+          if [[ "$BASE" == "dev" && "$HEAD" != "dev" && "$HEAD" != "qa" && "$HEAD" != "main" ]]; then
+            echo "✅ Allowed PR: ${HEAD} → dev (feature branch → dev)"
+            exit 0
+          fi
+
+          # ❌ 許可されていない PR の方向（エラー表示）
+          echo "::error::Invalid PR direction: ${HEAD} → ${BASE}. Allowed directions are dev → qa, qa → main, or feature branches (not dev/qa/main) → dev."
+          exit 1

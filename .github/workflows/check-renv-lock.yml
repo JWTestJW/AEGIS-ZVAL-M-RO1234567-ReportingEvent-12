@@ -1,0 +1,75 @@
+name: Check renv.lock
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  check-renv-lock:
+    name: actions/check-renv-lock
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check renv.lock existence
+        run: |
+          if [ ! -f "renv.lock" ]; then
+            echo "::error::renv.lock file not found in the repository root."
+            exit 1
+          fi
+          echo "renv.lock exists."
+
+      - name: Validate renv.lock content
+        # jq を使用して JSON をパースしてチェック
+        run: |
+          # 1. "R" ノードの存在確認
+          if ! jq -e '.R' renv.lock > /dev/null; then
+            echo "::error::'R' node not found in renv.lock."
+            exit 1
+          fi
+
+          # 2. "Repositories" ノードの存在確認
+          if ! jq -e '.R.Repositories' renv.lock > /dev/null; then
+            echo "::error::'Repositories' node not found under 'R' node in renv.lock."
+            exit 1
+          fi
+
+          # 3. "Repositories" が空でないか確認（配列の長さが 0 より大きいか）
+          REPO_COUNT=$(jq '.R.Repositories | length' renv.lock)
+          if [ "$REPO_COUNT" -eq 0 ]; then
+            echo "::error::'Repositories' list is empty."
+            exit 1
+          fi
+
+          echo "Basic structure check OK (Repositories count: $REPO_COUNT)"
+
+          # 4. URL のプレフィックスチェック
+          #    jq で URL のリストを抽出し、ループでチェック
+          ALLOWED_PREFIX="https://aegisrspm."
+
+          # jq -r で生文字列として取得
+          URLS=$(jq -r '.R.Repositories[].URL' renv.lock)
+
+          for URL in $URLS; do
+            if [[ "$URL" != "$ALLOWED_PREFIX"* ]]; then
+              echo "::error::Invalid repository URL detected: $URL"
+              echo "::error::URL must start with $ALLOWED_PREFIX"
+              exit 1
+            fi
+            echo "URL check OK: $URL"
+          done
+
+          echo "All URLs are valid."
+
+          # 5. Packages セクション内に Source が "Local" のパッケージが
+          #    含まれていないか確認（ローカルパッケージは許可しない）
+          LOCAL_PACKAGES=$(jq -r '[.Packages // {} | to_entries[] | select(.value.Source == "Local") | .key] | join(", ")' renv.lock)
+
+          if [ -n "$LOCAL_PACKAGES" ]; then
+            echo "::error::Packages with Source 'Local' found in 'Packages' section: $LOCAL_PACKAGES"
+            exit 1
+          fi
+
+          echo "Packages.Source check OK (No local packages)"
